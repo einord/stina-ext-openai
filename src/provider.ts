@@ -22,7 +22,6 @@ import {
   PROVIDER_ID,
   PROVIDER_NAME,
   MODEL_DISPLAY_NAMES,
-  isReasoningModel,
 } from './constants.js'
 import type {
   OpenAIModelsResponse,
@@ -310,8 +309,8 @@ async function* streamChat(
       requestBody.tool_choice = 'auto'
     }
 
-    // Add reasoning config for o-series models
-    if (isReasoningModel(model)) {
+    // Add reasoning config if enabled
+    if (reasoningEffort && reasoningEffort !== 'none') {
       const reasoning: OpenAIReasoningConfig = {
         effort: reasoningEffort as 'low' | 'medium' | 'high',
         summary: 'auto',
