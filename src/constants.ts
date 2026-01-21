@@ -25,11 +25,6 @@ export const PROVIDER_ID = 'openai'
 export const PROVIDER_NAME = 'OpenAI'
 
 /**
- * Models that support reasoning/thinking
- */
-export const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini', 'gpt-5']
-
-/**
  * Models that support vision/image input
  */
 export const VISION_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-vision-preview']
@@ -50,13 +45,6 @@ export const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'o3': 'o3',
   'o3-mini': 'o3 Mini',
   'o4-mini': 'o4 Mini',
-}
-
-/**
- * Checks if a model supports reasoning/thinking
- */
-export function isReasoningModel(modelId: string): boolean {
-  return REASONING_MODELS.some((rm) => modelId.startsWith(rm))
 }
 
 /**
