@@ -1,0 +1,35 @@
+{
+  "name": "stina-ext-openai",
+  "version": "1.0.0",
+  "description": "OpenAI AI provider extension for Stina",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "pack-extension": "node scripts/pack.js"
+  },
+  "keywords": [
+    "stina",
+    "extension",
+    "openai",
+    "gpt",
+    "ai",
+    "llm"
+  ],
+  "author": {
+    "name": "Stina Team",
+    "url": "https://github.com/einord"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/einord/stina-ext-openai.git"
+  },
+  "devDependencies": {
+    "@stina/extension-api": "^0.16.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}

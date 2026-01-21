@@ -1,0 +1,77 @@
+{
+  "$schema": "https://stina.app/schemas/extension-manifest.json",
+  "id": "openai-provider",
+  "name": "OpenAI AI Provider",
+  "version": "1.0.0",
+  "description": "Connect Stina to OpenAI's AI models including GPT-4o and reasoning models (o1, o3, o4-mini).",
+  "type": "provider",
+  "author": {
+    "name": "Stina Team",
+    "url": "https://github.com/einord"
+  },
+  "repository": "https://github.com/einord/stina-ext-openai",
+  "license": "MIT",
+  "engines": {
+    "stina": ">=0.5.0"
+  },
+  "platforms": ["web", "electron", "tui"],
+  "main": "index.js",
+
+  "permissions": [
+    "network:*",
+    "provider.register"
+  ],
+
+  "contributes": {
+    "providers": [
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "description": "GPT-4o, o1, o3, o4-mini and other OpenAI models",
+        "suggestedDefaultModel": "gpt-4o",
+        "defaultSettings": {
+          "apiKey": "",
+          "baseUrl": "https://api.openai.com/v1",
+          "organizationId": "",
+          "reasoningEffort": "medium"
+        },
+        "configSchema": {
+          "order": ["apiKey", "baseUrl", "organizationId", "reasoningEffort"],
+          "properties": {
+            "apiKey": {
+              "type": "password",
+              "title": "API Key",
+              "description": "Your OpenAI API key (required)",
+              "placeholder": "sk-...",
+              "required": true
+            },
+            "baseUrl": {
+              "type": "url",
+              "title": "Base URL",
+              "description": "API base URL (for proxies/custom endpoints)",
+              "placeholder": "https://api.openai.com/v1",
+              "default": "https://api.openai.com/v1"
+            },
+            "organizationId": {
+              "type": "string",
+              "title": "Organization ID",
+              "description": "Optional OpenAI Organization ID",
+              "placeholder": "org-..."
+            },
+            "reasoningEffort": {
+              "type": "select",
+              "title": "Reasoning Effort",
+              "description": "Controls reasoning depth for o1/o3/o4-mini models",
+              "default": "medium",
+              "options": [
+                { "value": "low", "label": "Low" },
+                { "value": "medium", "label": "Medium" },
+                { "value": "high", "label": "High" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
