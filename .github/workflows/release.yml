@@ -70,13 +70,13 @@ jobs:
           name: v${{ steps.version.outputs.version }}
           body: |
             ## OpenAI AI Provider v${{ steps.version.outputs.version }}
-
+            
             ### Installation
-
+            
             Download `openai-provider-${{ steps.version.outputs.version }}.zip` and install it in Stina.
-
+            
             ### Changes
-
+            
             See the [GitHub Releases](https://github.com/${{ github.repository }}/releases) page for details.
           files: releases/openai-provider-${{ steps.version.outputs.version }}.zip
           draft: false
