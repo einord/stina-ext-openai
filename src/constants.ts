@@ -27,7 +27,7 @@ export const PROVIDER_NAME = 'OpenAI'
 /**
  * Models that support reasoning/thinking
  */
-export const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini']
+export const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini', 'gpt-5']
 
 /**
  * Models that support vision/image input
