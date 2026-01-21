@@ -29,6 +29,7 @@ import type {
   OpenAIInputItem,
   OpenAIInputMessage,
   OpenAIToolResultMessage,
+  OpenAIFunctionCallInput,
   OpenAITool,
   OpenAIStreamEvent,
   OpenAIReasoningConfig,
@@ -196,9 +197,11 @@ function convertToolsToOpenAI(tools?: ToolDefinition[]): OpenAITool[] | undefine
 }
 
 /**
- * Convert ChatMessage to OpenAI Responses API format
+ * Convert ChatMessage to OpenAI Responses API format.
+ * Returns an array because assistant messages with tool_calls need to be converted
+ * to multiple function_call items.
  */
-function convertMessageToOpenAI(message: ChatMessage): OpenAIInputItem {
+function convertMessageToOpenAI(message: ChatMessage): OpenAIInputItem[] {
   // Handle tool result messages
   if (message.role === 'tool') {
     const toolResult: OpenAIToolResultMessage = {
@@ -206,7 +209,33 @@ function convertMessageToOpenAI(message: ChatMessage): OpenAIInputItem {
       call_id: message.tool_call_id || generateToolCallId(),
       output: message.content,
     }
-    return toolResult
+    return [toolResult]
+  }
+
+  // Handle assistant messages with tool calls
+  if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+    const items: OpenAIInputItem[] = []
+
+    // Add the assistant message if it has content
+    if (message.content) {
+      items.push({
+        role: 'assistant',
+        content: message.content,
+      })
+    }
+
+    // Add function_call items for each tool call
+    for (const toolCall of message.tool_calls) {
+      const functionCall: OpenAIFunctionCallInput = {
+        type: 'function_call',
+        call_id: toolCall.id,
+        name: sanitizeToolName(toolCall.name),
+        arguments: JSON.stringify(toolCall.arguments),
+      }
+      items.push(functionCall)
+    }
+
+    return items
   }
 
   // Handle regular messages
@@ -215,7 +244,7 @@ function convertMessageToOpenAI(message: ChatMessage): OpenAIInputItem {
     content: message.content,
   }
 
-  return inputMessage
+  return [inputMessage]
 }
 
 /**
@@ -270,7 +299,7 @@ async function* streamChat(
   })
 
   // Convert messages to OpenAI Responses API format
-  const inputItems: OpenAIInputItem[] = messages.map(convertMessageToOpenAI)
+  const inputItems: OpenAIInputItem[] = messages.flatMap(convertMessageToOpenAI)
 
   // Convert tools to OpenAI format
   const openaiTools = convertToolsToOpenAI(options.tools)

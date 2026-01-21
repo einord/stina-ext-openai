@@ -55,9 +55,19 @@ export interface OpenAIToolResultMessage {
 }
 
 /**
+ * Function call input item (for passing assistant's tool calls back to the API)
+ */
+export interface OpenAIFunctionCallInput {
+  type: 'function_call'
+  call_id: string
+  name: string
+  arguments: string
+}
+
+/**
  * Union type for all input item types
  */
-export type OpenAIInputItem = OpenAIInputMessage | OpenAIToolResultMessage
+export type OpenAIInputItem = OpenAIInputMessage | OpenAIToolResultMessage | OpenAIFunctionCallInput
 
 /**
  * Function tool definition
