@@ -167,6 +167,22 @@ async function fetchModels(
 }
 
 /**
+ * Sanitizes a tool name to comply with OpenAI's naming requirements.
+ * OpenAI only allows [a-zA-Z0-9_-] in tool names, so we replace dots with a unique pattern.
+ */
+function sanitizeToolName(name: string): string {
+  return name.replace(/\./g, '-DOT-')
+}
+
+/**
+ * Restores the original tool name from a sanitized version.
+ * Converts the unique pattern back to dots.
+ */
+function restoreToolName(sanitizedName: string): string {
+  return sanitizedName.replace(/-DOT-/g, '.')
+}
+
+/**
  * Convert tools to OpenAI Responses API format
  */
 function convertToolsToOpenAI(tools?: ToolDefinition[]): OpenAITool[] | undefined {
@@ -174,7 +190,7 @@ function convertToolsToOpenAI(tools?: ToolDefinition[]): OpenAITool[] | undefine
 
   return tools.map((tool) => ({
     type: 'function' as const,
-    name: tool.id,
+    name: sanitizeToolName(tool.id),
     description: localizedStringToString(tool.description),
     parameters: tool.parameters,
   }))
@@ -351,7 +367,7 @@ async function* streamChat(
             // Track new function call
             if (event.item.type === 'function_call' && event.item.name && event.item.call_id) {
               functionCalls.set(event.output_index, {
-                name: event.item.name,
+                name: restoreToolName(event.item.name),
                 callId: event.item.call_id,
                 arguments: '',
               })
