@@ -16,10 +16,14 @@ import { createOpenAIProvider } from './provider.js'
  * Called when the extension is loaded by Stina.
  */
 function activate(context: ExtensionContext): Disposable {
+  if (!context.network || !context.providers) {
+    throw new Error('Extension requires network and provider capabilities')
+  }
+
   context.log.info('Activating OpenAI provider extension')
 
   const provider = createOpenAIProvider(context)
-  const disposable = context.providers!.register(provider)
+  const disposable = context.providers.register(provider)
 
   context.log.info('OpenAI provider registered successfully')
 
