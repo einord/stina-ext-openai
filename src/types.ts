@@ -285,3 +285,17 @@ export type OpenAIStreamEvent =
   | OpenAIResponseCompletedEvent
   | OpenAIErrorEvent
 
+// ============================================================================
+// OAuth Types
+// ============================================================================
+
+/**
+ * OAuth token response from device code flow
+ */
+export interface TokenResponse {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+  tokenType: string
+}
+

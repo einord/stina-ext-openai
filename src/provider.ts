@@ -32,18 +32,34 @@ import type {
   OpenAIStreamEvent,
   OpenAIReasoningConfig,
 } from './types.js'
+import type { TokenManager } from './oauth/token-manager.js'
 import { localizedStringToString, generateToolCallId } from './utils.js'
+
+/**
+ * Resolves the auth token based on the configured auth method.
+ * Returns the API key for api_key method, or OAuth token for chatgpt_oauth method.
+ */
+async function resolveAuthToken(
+  settings: Record<string, unknown> | undefined,
+  tokenManager: TokenManager | null
+): Promise<string | null> {
+  if (settings?.authMethod === 'chatgpt_oauth') {
+    if (!tokenManager) return null
+    return tokenManager.getAccessToken()
+  }
+  return (settings?.apiKey as string) || null
+}
 
 /**
  * Creates the OpenAI AI provider
  */
-export function createOpenAIProvider(context: ExtensionContext): AIProvider {
+export function createOpenAIProvider(context: ExtensionContext, tokenManager: TokenManager | null): AIProvider {
   return {
     id: PROVIDER_ID,
     name: PROVIDER_NAME,
 
-    getModels: (options?: GetModelsOptions) => fetchModels(context, options),
-    chat: (messages: ChatMessage[], options: ChatOptions) => streamChat(context, messages, options),
+    getModels: (options?: GetModelsOptions) => fetchModels(context, tokenManager, options),
+    chat: (messages: ChatMessage[], options: ChatOptions) => streamChat(context, tokenManager, messages, options),
   }
 }
 
@@ -52,20 +68,26 @@ export function createOpenAIProvider(context: ExtensionContext): AIProvider {
  */
 async function fetchModels(
   context: ExtensionContext,
+  tokenManager: TokenManager | null,
   options?: GetModelsOptions
 ): Promise<ModelInfo[]> {
   const baseUrl = (options?.settings?.baseUrl as string) || DEFAULT_OPENAI_URL
-  const apiKey = options?.settings?.apiKey as string
+  const token = await resolveAuthToken(options?.settings, tokenManager)
 
-  if (!apiKey) {
-    context.log.warn('No API key configured for OpenAI')
+  if (!token) {
+    const authMethod = options?.settings?.authMethod as string
+    if (authMethod === 'chatgpt_oauth') {
+      context.log.warn('Not connected to ChatGPT — use the Connect button in extension settings')
+    } else {
+      context.log.warn('No API key configured for OpenAI')
+    }
     return []
   }
 
   context.log.debug('Fetching models from OpenAI', { baseUrl })
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${token}`,
   }
 
   const organizationId = options?.settings?.organizationId as string
@@ -230,16 +252,22 @@ function parseSSEEvent(line: string): OpenAIStreamEvent | null {
  */
 async function* streamChat(
   context: ExtensionContext,
+  tokenManager: TokenManager | null,
   messages: ChatMessage[],
   options: ChatOptions
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const baseUrl = (options.settings?.baseUrl as string) || DEFAULT_OPENAI_URL
-  const apiKey = options.settings?.apiKey as string
+  const token = await resolveAuthToken(options.settings, tokenManager)
   const model = options.model || DEFAULT_MODEL
   const reasoningEffort = (options.settings?.reasoningEffort as string) || 'medium'
 
-  if (!apiKey) {
-    yield { type: 'error', message: 'No API key configured for OpenAI' }
+  if (!token) {
+    const authMethod = options.settings?.authMethod as string
+    if (authMethod === 'chatgpt_oauth') {
+      yield { type: 'error', message: 'Not connected to ChatGPT. Please use the Connect button in extension settings.' }
+    } else {
+      yield { type: 'error', message: 'No API key configured for OpenAI' }
+    }
     return
   }
 
@@ -259,7 +287,7 @@ async function* streamChat(
   // Build request headers
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${token}`,
   }
 
   const organizationId = options.settings?.organizationId as string

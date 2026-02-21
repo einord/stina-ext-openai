@@ -43,3 +43,26 @@ export const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'o3-mini': 'o3 Mini',
   'o4-mini': 'o4 Mini',
 }
+
+// ============================================================================
+// OAuth Constants
+// ============================================================================
+
+/** OpenAI OAuth device code endpoint */
+export const OPENAI_DEVICE_CODE_URL = 'https://auth.openai.com/oauth/device/code'
+
+/** OpenAI OAuth token endpoint */
+export const OPENAI_TOKEN_URL = 'https://auth.openai.com/oauth/token'
+
+/** Default OAuth client ID (Codex public client) */
+export const DEFAULT_OPENAI_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+
+/** OAuth scopes for ChatGPT login */
+export const OPENAI_OAUTH_SCOPES = ['openid', 'profile', 'email', 'offline_access']
+
+/** Secret storage keys for OAuth tokens */
+export const SECRET_KEYS = {
+  accessToken: 'oauth_access_token',
+  refreshToken: 'oauth_refresh_token',
+  expiresAt: 'oauth_expires_at',
+} as const
