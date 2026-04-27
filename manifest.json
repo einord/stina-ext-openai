@@ -35,41 +35,41 @@
           "organizationId": "",
           "reasoningEffort": "medium"
         },
-        "configSchema": {
-          "order": ["apiKey", "baseUrl", "organizationId", "reasoningEffort"],
-          "properties": {
-            "apiKey": {
-              "type": "password",
-              "title": "API Key",
-              "description": "Your OpenAI API key (required)",
-              "placeholder": "sk-...",
-              "required": true
-            },
-            "baseUrl": {
-              "type": "url",
-              "title": "Base URL",
-              "description": "API base URL (for proxies/custom endpoints)",
-              "placeholder": "https://api.openai.com/v1",
-              "default": "https://api.openai.com/v1"
-            },
-            "organizationId": {
-              "type": "string",
-              "title": "Organization ID",
-              "description": "Optional OpenAI Organization ID",
-              "placeholder": "org-..."
-            },
-            "reasoningEffort": {
-              "type": "select",
-              "title": "Reasoning Effort",
-              "description": "Controls reasoning depth for models that support it. Set to None to disable.",
-              "default": "none",
-              "options": [
-                { "value": "none", "label": "None" },
-                { "value": "low", "label": "Low" },
-                { "value": "medium", "label": "Medium" },
-                { "value": "high", "label": "High" }
-              ]
-            }
+        "configView": {
+          "content": {
+            "component": "VerticalStack",
+            "gap": 1,
+            "children": [
+              {
+                "component": "PasswordInput",
+                "label": "API Key",
+                "placeholder": "sk-...",
+                "value": "$settings.apiKey"
+              },
+              {
+                "component": "TextInput",
+                "label": "Base URL",
+                "placeholder": "https://api.openai.com/v1",
+                "value": "$settings.baseUrl"
+              },
+              {
+                "component": "TextInput",
+                "label": "Organization ID",
+                "placeholder": "org-...",
+                "value": "$settings.organizationId"
+              },
+              {
+                "component": "Select",
+                "label": "Reasoning Effort",
+                "options": [
+                  { "value": "none", "label": "None" },
+                  { "value": "low", "label": "Low" },
+                  { "value": "medium", "label": "Medium" },
+                  { "value": "high", "label": "High" }
+                ],
+                "selectedValue": "$settings.reasoningEffort"
+              }
+            ]
           }
         }
       }
