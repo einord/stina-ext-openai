@@ -1,19 +1,26 @@
 /**
  * In-memory OAuth UI state.
+ *
+ * The toolSetting view in manifest.json reads this via the getOAuthState action.
+ * It is intentionally process-local — persistent state lives in SecretsAPI.
  */
 
 export interface OAuthState {
   status: 'disconnected' | 'awaiting' | 'connected' | 'error'
-  verificationUrl: string
-  userCode: string
+  /** Markdown link to start the authorize flow (only set during 'awaiting'). */
+  authorizeUrl: string
   errorMessage: string
+  /** Identity claims shown in the UI when status === 'connected'. */
+  email: string
+  planType: string
 }
 
 const defaultState: OAuthState = {
   status: 'disconnected',
-  verificationUrl: '',
-  userCode: '',
+  authorizeUrl: '',
   errorMessage: '',
+  email: '',
+  planType: '',
 }
 
 let currentState: OAuthState = { ...defaultState }

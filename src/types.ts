@@ -26,6 +26,24 @@ export interface OpenAIModel {
   owned_by: string
 }
 
+/**
+ * Codex backend response shape for `/models`. Uses `slug` + `display_name`
+ * instead of OpenAI's `id` + `owned_by` and includes ChatGPT-subscription-
+ * specific metadata (priority, visibility, reasoning support).
+ */
+export interface CodexModelsResponse {
+  models: CodexModel[]
+}
+
+export interface CodexModel {
+  slug: string
+  display_name: string
+  description?: string
+  priority?: number
+  visibility?: string
+  supported_in_api?: boolean
+}
+
 // ============================================================================
 // Responses API Types
 // ============================================================================
@@ -101,6 +119,12 @@ export interface OpenAIResponsesRequest {
   input: OpenAIInputItem[]
   instructions?: string
   stream?: boolean
+  /**
+   * Whether the API should persist the response server-side. The Codex
+   * subscription backend rejects requests where this is unset or true with
+   * "Store must be set to false". Standard API accepts either value.
+   */
+  store?: boolean
   temperature?: number
   max_output_tokens?: number
   tools?: OpenAITool[]
@@ -297,5 +321,18 @@ export interface TokenResponse {
   refreshToken: string
   expiresIn: number
   tokenType: string
+}
+
+/** Result from building the authorization flow URL */
+export interface AuthorizeFlowResult {
+  authorizeUrl: string
+  codeVerifier: string
+  state: string
+}
+
+/** Result from the OAuth callback (authorization code + state) */
+export interface CallbackResult {
+  code: string
+  state: string
 }
 

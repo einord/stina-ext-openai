@@ -20,8 +20,11 @@ import {
   PROVIDER_ID,
   PROVIDER_NAME,
   MODEL_DISPLAY_NAMES,
+  OPENAI_CODEX_BASE_URL,
+  STINA_ORIGINATOR,
 } from './constants.js'
 import type {
+  CodexModelsResponse,
   OpenAIModelsResponse,
   OpenAIResponsesRequest,
   OpenAIInputItem,
@@ -35,19 +38,149 @@ import type {
 import type { TokenManager } from './oauth/token-manager.js'
 import { localizedStringToString, generateToolCallId } from './utils.js'
 
+const EXTENSION_VERSION = '1.0.0'
+
 /**
- * Resolves the auth token based on the configured auth method.
- * Returns the API key for api_key method, or OAuth token for chatgpt_oauth method.
+ * Fallback model list used when the Codex `/models` endpoint can't be reached
+ * (network error, 404 on a future API change, etc.). The live endpoint is the
+ * primary source — this is purely a safety net so the model picker is never
+ * empty in OAuth mode.
  */
-async function resolveAuthToken(
+const CODEX_FALLBACK_MODELS: ReadonlyArray<{ id: string; name: string }> = [
+  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+  { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
+]
+
+interface RequestConfig {
+  baseUrl: string
+  headers: Record<string, string>
+}
+
+interface RequestConfigError {
+  error: string
+}
+
+function isAuthMethodOAuth(settings: Record<string, unknown> | undefined): boolean {
+  return settings?.authMethod === 'chatgpt_oauth'
+}
+
+/**
+ * Resolves base URL and request headers for either auth mode.
+ *
+ * In API-key mode this is the standard OpenAI API. In OAuth mode the request
+ * must be routed to the Codex backend with a ChatGPT-Account-Id header — the
+ * standard /v1 endpoint rejects ChatGPT subscription tokens.
+ */
+async function buildRequestConfig(
   settings: Record<string, unknown> | undefined,
-  tokenManager: TokenManager | null
-): Promise<string | null> {
-  if (settings?.authMethod === 'chatgpt_oauth') {
-    if (!tokenManager) return null
-    return tokenManager.getAccessToken()
+  tokenManager: TokenManager | null,
+): Promise<RequestConfig | RequestConfigError> {
+  if (isAuthMethodOAuth(settings)) {
+    if (!tokenManager) {
+      return { error: 'OAuth is not available — secrets API missing.' }
+    }
+    const token = await tokenManager.getAccessToken()
+    if (!token) {
+      return {
+        error: 'Not connected to ChatGPT. Please use the Connect button in extension settings.',
+      }
+    }
+    const identity = await tokenManager.getIdentity()
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      originator: STINA_ORIGINATOR,
+      version: EXTENSION_VERSION,
+      'User-Agent': `${STINA_ORIGINATOR}/${EXTENSION_VERSION}`,
+    }
+    if (identity?.accountId) {
+      headers['ChatGPT-Account-Id'] = identity.accountId
+    }
+    return {
+      baseUrl: OPENAI_CODEX_BASE_URL,
+      headers,
+    }
   }
-  return (settings?.apiKey as string) || null
+
+  const apiKey = settings?.apiKey as string | undefined
+  if (!apiKey) {
+    return { error: 'No API key configured for OpenAI' }
+  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+  }
+  const organizationId = settings?.organizationId as string | undefined
+  if (organizationId) {
+    headers['OpenAI-Organization'] = organizationId
+  }
+  return {
+    baseUrl: (settings?.baseUrl as string) || DEFAULT_OPENAI_URL,
+    headers,
+  }
+}
+
+/**
+ * Fetches the model catalog from the Codex backend (`/models`). The endpoint
+ * uses a subscription token in the same way as `/responses`. Falls back to a
+ * small curated list on any error so the picker is never empty.
+ */
+async function fetchCodexModels(
+  context: ExtensionContext,
+  tokenManager: TokenManager,
+): Promise<ModelInfo[]> {
+  const token = await tokenManager.getAccessToken()
+  if (!token) {
+    context.log.warn('Codex models requested but no access token available')
+    return CODEX_FALLBACK_MODELS.map((m) => ({ id: m.id, name: m.name }))
+  }
+
+  const identity = await tokenManager.getIdentity()
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+    originator: STINA_ORIGINATOR,
+    version: EXTENSION_VERSION,
+    'User-Agent': `${STINA_ORIGINATOR}/${EXTENSION_VERSION}`,
+  }
+  if (identity?.accountId) {
+    headers['ChatGPT-Account-Id'] = identity.accountId
+  }
+
+  // Codex parses client_version as semver (major.minor.patch only) and rejects
+  // anything else with HTTP 400 "Invalid client_version format".
+  const url = `${OPENAI_CODEX_BASE_URL}/models?client_version=${encodeURIComponent(EXTENSION_VERSION)}`
+
+  try {
+    const response = await context.network!.fetch(url, { headers })
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      context.log.warn('Codex /models returned non-OK; using fallback list', {
+        status: response.status,
+        body: body.slice(0, 256),
+      })
+      return CODEX_FALLBACK_MODELS.map((m) => ({ id: m.id, name: m.name }))
+    }
+    const data = (await response.json()) as CodexModelsResponse
+    const models = (data.models ?? [])
+      .slice()
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      .map((m) => ({
+        id: m.slug,
+        name: m.display_name || m.slug,
+        description: m.description,
+      }))
+    if (models.length === 0) {
+      context.log.warn('Codex /models returned an empty list; using fallback')
+      return CODEX_FALLBACK_MODELS.map((m) => ({ id: m.id, name: m.name }))
+    }
+    context.log.info('Fetched Codex models', { count: models.length })
+    return models
+  } catch (error) {
+    context.log.warn('Codex /models request failed; using fallback list', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return CODEX_FALLBACK_MODELS.map((m) => ({ id: m.id, name: m.name }))
+  }
 }
 
 /**
@@ -64,39 +197,38 @@ export function createOpenAIProvider(context: ExtensionContext, tokenManager: To
 }
 
 /**
- * Fetches available models from the OpenAI API
+ * Fetches available models.
+ *
+ * In API-key mode the standard OpenAI /models endpoint is queried and filtered
+ * to chat models. In OAuth mode the Codex backend exposes its own /models
+ * listing (different shape — `slug` + `display_name`) which we query with the
+ * subscription token; if that fails we fall back to a small curated list.
  */
 async function fetchModels(
   context: ExtensionContext,
   tokenManager: TokenManager | null,
   options?: GetModelsOptions
 ): Promise<ModelInfo[]> {
-  const baseUrl = (options?.settings?.baseUrl as string) || DEFAULT_OPENAI_URL
-  const token = await resolveAuthToken(options?.settings, tokenManager)
-
-  if (!token) {
-    const authMethod = options?.settings?.authMethod as string
-    if (authMethod === 'chatgpt_oauth') {
+  if (isAuthMethodOAuth(options?.settings)) {
+    if (!tokenManager || !(await tokenManager.isConnected())) {
       context.log.warn('Not connected to ChatGPT — use the Connect button in extension settings')
-    } else {
-      context.log.warn('No API key configured for OpenAI')
+      return []
     }
+    return await fetchCodexModels(context, tokenManager)
+  }
+
+  const config = await buildRequestConfig(options?.settings, tokenManager)
+  if ('error' in config) {
+    context.log.warn(config.error)
     return []
   }
 
-  context.log.debug('Fetching models from OpenAI', { baseUrl })
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-  }
-
-  const organizationId = options?.settings?.organizationId as string
-  if (organizationId) {
-    headers['OpenAI-Organization'] = organizationId
-  }
+  context.log.debug('Fetching models from OpenAI', { baseUrl: config.baseUrl })
 
   try {
-    const response = await context.network!.fetch(`${baseUrl}/models`, { headers })
+    const response = await context.network!.fetch(`${config.baseUrl}/models`, {
+      headers: config.headers,
+    })
 
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`)
@@ -168,6 +300,30 @@ function convertToolsToOpenAI(tools?: ToolDefinition[]): OpenAITool[] | undefine
     description: localizedStringToString(tool.description),
     parameters: tool.parameters,
   }))
+}
+
+/**
+ * Default instructions used when the conversation contains no system message.
+ * The Codex backend (`chatgpt.com/backend-api/codex`) rejects requests without
+ * a top-level `instructions` field with HTTP 400 "Instructions are required".
+ */
+const DEFAULT_INSTRUCTIONS = 'You are a helpful assistant.'
+
+/**
+ * Computes the top-level `instructions` value by concatenating system messages.
+ * The original messages are NOT removed from input — system messages are still
+ * forwarded as `developer` role items so the model sees them in conversation
+ * order, and so Codex doesn't reject the request for an empty input array
+ * (which happens at conversation start when Stina sends only system messages).
+ */
+function buildInstructions(messages: ChatMessage[]): string {
+  const systemTexts: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'system') continue
+    const text = typeof message.content === 'string' ? message.content : ''
+    if (text.trim().length > 0) systemTexts.push(text)
+  }
+  return systemTexts.join('\n\n').trim() || DEFAULT_INSTRUCTIONS
 }
 
 /**
@@ -256,50 +412,49 @@ async function* streamChat(
   messages: ChatMessage[],
   options: ChatOptions
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  const baseUrl = (options.settings?.baseUrl as string) || DEFAULT_OPENAI_URL
-  const token = await resolveAuthToken(options.settings, tokenManager)
   const model = options.model || DEFAULT_MODEL
   const reasoningEffort = (options.settings?.reasoningEffort as string) || 'medium'
 
-  if (!token) {
-    const authMethod = options.settings?.authMethod as string
-    if (authMethod === 'chatgpt_oauth') {
-      yield { type: 'error', message: 'Not connected to ChatGPT. Please use the Connect button in extension settings.' }
-    } else {
-      yield { type: 'error', message: 'No API key configured for OpenAI' }
-    }
+  const config = await buildRequestConfig(options.settings, tokenManager)
+  if ('error' in config) {
+    yield { type: 'error', message: config.error }
     return
   }
 
+  // The Codex backend requires a top-level `instructions` field. We build it
+  // from any system messages but ALSO keep those system messages in `input`
+  // (as `developer` role) so the request is never empty — Stina sends only
+  // system messages at conversation start, expecting the model to generate
+  // a greeting.
+  const instructions = buildInstructions(messages)
+  const inputItems: OpenAIInputItem[] = messages.flatMap(convertMessageToOpenAI)
+
   context.log.debug('Starting streaming chat with OpenAI', {
-    baseUrl,
+    baseUrl: config.baseUrl,
+    authMethod: isAuthMethodOAuth(options.settings) ? 'chatgpt_oauth' : 'api_key',
     model,
     reasoningEffort,
     messageCount: messages.length,
+    inputItemCount: inputItems.length,
+    instructionsLength: instructions.length,
   })
-
-  // Convert messages to OpenAI Responses API format
-  const inputItems: OpenAIInputItem[] = messages.flatMap(convertMessageToOpenAI)
 
   // Convert tools to OpenAI format
   const openaiTools = convertToolsToOpenAI(options.tools)
 
-  // Build request headers
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  }
-
-  const organizationId = options.settings?.organizationId as string
-  if (organizationId) {
-    headers['OpenAI-Organization'] = organizationId
+    ...config.headers,
   }
 
   try {
     const requestBody: OpenAIResponsesRequest = {
       model,
+      instructions,
       input: inputItems,
       stream: true,
+      // Codex backend requires this explicitly false; standard API doesn't care.
+      store: false,
     }
 
     // Add temperature if provided
@@ -328,7 +483,7 @@ async function* streamChat(
     }
 
     // Use streaming fetch
-    const stream = context.network!.fetchStream(`${baseUrl}/responses`, {
+    const stream = context.network!.fetchStream(`${config.baseUrl}/responses`, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),

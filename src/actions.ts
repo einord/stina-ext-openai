@@ -1,13 +1,31 @@
 /**
- * OAuth action handlers for toolSettings UI.
+ * OAuth action handlers.
+ *
+ * Two completion paths are supported:
+ *   1. The local callback server captures the redirect automatically (works in
+ *      dev when the API runs on the same host as the user's browser).
+ *   2. The user pastes the redirect URL into the UI manually (works when the
+ *      API is in a Docker container or on a remote host where localhost:1455
+ *      is unreachable from the browser).
+ *
+ * Both paths converge on `completeOAuthFlow()`.
  */
 
-import type { ExtensionContext, Disposable } from '@stina/extension-api/runtime'
+import type { ActionResult, ExtensionContext, Disposable } from '@stina/extension-api/runtime'
 import type { TokenManager } from './oauth/token-manager.js'
-import { initiateOpenAIAuth, pollOpenAIToken } from './oauth/openai.js'
+import { buildAuthorizeFlow, exchangeCodeForTokens } from './oauth/auth-code.js'
+import { startCallbackServer, type CallbackServer } from './oauth/callback-server.js'
 import { getState, setState, resetState } from './oauth-state.js'
 
-const MAX_POLL_ATTEMPTS = 60
+/** Active callback server instance (if any). */
+let activeCallbackServer: CallbackServer | null = null
+
+/**
+ * PKCE verifier + expected state for the in-flight authorize flow. Both the
+ * automatic callback path and the manual paste path consume this and clear it
+ * once tokens are stored.
+ */
+let pendingFlow: { codeVerifier: string; expectedState: string } | null = null
 
 export function registerOAuthActions(
   context: ExtensionContext,
@@ -15,155 +33,247 @@ export function registerOAuthActions(
 ): Disposable[] {
   const disposables: Disposable[] = []
 
-  // Action: Get current OAuth state
-  if (context.actions) {
-    disposables.push(
-      context.actions.register({
-        id: 'getOAuthState',
-        async execute() {
-          const connected = await tokenManager.isConnected()
-          const state = getState()
+  if (!context.actions) return disposables
 
-          // Sync state with actual token status
-          if (connected && state.status !== 'awaiting') {
-            setState({ status: 'connected' })
-          } else if (!connected && state.status === 'connected') {
-            setState({ status: 'disconnected' })
+  // Action: Get current OAuth state
+  disposables.push(
+    context.actions.register({
+      id: 'getOAuthState',
+      async execute() {
+        const connected = await tokenManager.isConnected()
+        const state = getState()
+
+        if (connected && state.status !== 'awaiting') {
+          const identity = await tokenManager.getIdentity()
+          setState({
+            status: 'connected',
+            email: identity?.email ?? '',
+            planType: identity?.planType ?? '',
+          })
+        } else if (!connected && state.status === 'connected') {
+          setState({ status: 'disconnected', email: '', planType: '' })
+        }
+
+        return { success: true, data: getState() }
+      },
+    })
+  )
+
+  // Action: Start ChatGPT OAuth flow (Authorization Code with PKCE)
+  disposables.push(
+    context.actions.register({
+      id: 'startChatGPTOAuth',
+      async execute() {
+        try {
+          if (activeCallbackServer) {
+            activeCallbackServer.close()
+            activeCallbackServer = null
           }
+
+          context.log.info('Starting ChatGPT OAuth authorization code flow')
+
+          const flow = buildAuthorizeFlow()
+          pendingFlow = { codeVerifier: flow.codeVerifier, expectedState: flow.state }
+
+          // Best-effort: start a local callback server. Will only catch the
+          // redirect when the user's browser can reach localhost:1455 on the
+          // same host as the API process.
+          const callbackServer = startCallbackServer()
+          activeCallbackServer = callbackServer
+
+          setState({
+            status: 'awaiting',
+            authorizeUrl: `[Sign in with OpenAI](${flow.authorizeUrl})`,
+            errorMessage: '',
+          })
+
+          await context.events?.emit('openai.oauth.changed')
+
+          void waitForOAuthCallback(context, tokenManager, callbackServer)
+
+          return {
+            success: true,
+            data: { ...getState(), openUrl: flow.authorizeUrl },
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          context.log.error('Failed to start OAuth flow', { error: message })
+
+          setState({ status: 'error', errorMessage: message, authorizeUrl: '' })
+          await context.events?.emit('openai.oauth.changed')
+          return { success: false, error: message }
+        }
+      },
+    })
+  )
+
+  // Action: Submit a pasted callback URL (or just the code+state) manually.
+  disposables.push(
+    context.actions.register({
+      id: 'submitOAuthCallback',
+      async execute(params): Promise<ActionResult> {
+        try {
+          const url = typeof params?.url === 'string' ? params.url.trim() : ''
+          if (!url) {
+            return { success: false, error: 'Paste the redirect URL before submitting.' }
+          }
+
+          const parsed = parseCallbackInput(url)
+          if (!parsed) {
+            return {
+              success: false,
+              error: 'Could not find a code in the URL. Make sure you copied the full redirect URL.',
+            }
+          }
+
+          if (!pendingFlow) {
+            return {
+              success: false,
+              error: 'No login is in progress. Click Connect to start a new login.',
+            }
+          }
+
+          if (parsed.state && parsed.state !== pendingFlow.expectedState) {
+            return {
+              success: false,
+              error: 'The pasted URL is from a different login attempt. Please retry.',
+            }
+          }
+
+          await completeOAuthFlow(context, tokenManager, parsed.code, pendingFlow.codeVerifier)
+
+          // Tear down the callback server — we don't need it anymore.
+          if (activeCallbackServer) {
+            activeCallbackServer.close()
+            activeCallbackServer = null
+          }
+          pendingFlow = null
 
           return { success: true, data: getState() }
-        },
-      })
-    )
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          context.log.error('Manual OAuth submission failed', { error: message })
+          setState({ status: 'error', errorMessage: message, authorizeUrl: '' })
+          await context.events?.emit('openai.oauth.changed')
+          return { success: false, error: message }
+        }
+      },
+    })
+  )
 
-    // Action: Start ChatGPT OAuth flow
-    disposables.push(
-      context.actions.register({
-        id: 'startChatGPTOAuth',
-        async execute() {
-          try {
-            context.log.info('Starting ChatGPT OAuth device code flow')
-
-            const result = await initiateOpenAIAuth()
-
-            setState({
-              status: 'awaiting',
-              verificationUrl: result.verificationUrl,
-              userCode: result.userCode,
-              errorMessage: '',
-            })
-
-            // Emit event so UI updates immediately
-            await context.events?.emit('openai.oauth.changed')
-
-            // Start background polling (fire and forget)
-            void pollInBackground(context, tokenManager, result.deviceCode, result.interval)
-
-            return { success: true, data: getState() }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            context.log.error('Failed to start OAuth flow', { error: message })
-
-            setState({
-              status: 'error',
-              errorMessage: message,
-              verificationUrl: '',
-              userCode: '',
-            })
-
-            await context.events?.emit('openai.oauth.changed')
-
-            return { success: false, error: message }
+  // Action: Disconnect ChatGPT OAuth
+  disposables.push(
+    context.actions.register({
+      id: 'disconnectChatGPTOAuth',
+      async execute() {
+        try {
+          if (activeCallbackServer) {
+            activeCallbackServer.close()
+            activeCallbackServer = null
           }
-        },
-      })
-    )
+          pendingFlow = null
 
-    // Action: Disconnect ChatGPT OAuth
-    disposables.push(
-      context.actions.register({
-        id: 'disconnectChatGPTOAuth',
-        async execute() {
-          try {
-            await tokenManager.clearTokens()
-            resetState()
-            await context.events?.emit('openai.oauth.changed')
+          await tokenManager.clearTokens()
+          resetState()
+          await context.events?.emit('openai.oauth.changed')
 
-            context.log.info('ChatGPT OAuth disconnected')
-            return { success: true, data: getState() }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            return { success: false, error: message }
-          }
-        },
-      })
-    )
-  }
+          context.log.info('ChatGPT OAuth disconnected')
+          return { success: true, data: getState() }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          return { success: false, error: message }
+        }
+      },
+    })
+  )
 
   return disposables
 }
 
 /**
- * Background polling loop for device code authorization.
+ * Accepts either a full redirect URL or a bare query string, and extracts the
+ * authorization code and state. Returns null if no code can be found.
  */
-async function pollInBackground(
-  context: ExtensionContext,
-  tokenManager: TokenManager,
-  deviceCode: string,
-  interval: number
-): Promise<void> {
-  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-    await sleep(interval * 1000)
-
+function parseCallbackInput(input: string): { code: string; state: string | null } | null {
+  let search: URLSearchParams
+  try {
+    // Full URL form
+    search = new URL(input).searchParams
+  } catch {
+    // Bare ?code=...&state=... or code=...&state=... form
+    const trimmed = input.startsWith('?') ? input.slice(1) : input
     try {
-      const token = await pollOpenAIToken(undefined, deviceCode)
-
-      if (token) {
-        // Success — store tokens and update state
-        await tokenManager.storeTokens(token.accessToken, token.refreshToken, token.expiresIn)
-
-        setState({
-          status: 'connected',
-          verificationUrl: '',
-          userCode: '',
-          errorMessage: '',
-        })
-
-        context.log.info('ChatGPT OAuth connected successfully')
-        await context.events?.emit('openai.oauth.changed')
-        return
-      }
-
-      // null means authorization_pending — continue polling
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      context.log.error('OAuth polling error', { error: message, attempt })
-
-      setState({
-        status: 'error',
-        errorMessage: message,
-        verificationUrl: '',
-        userCode: '',
-      })
-
-      await context.events?.emit('openai.oauth.changed')
-      return
+      search = new URLSearchParams(trimmed)
+    } catch {
+      return null
     }
   }
 
-  // Timeout — polling exhausted
-  context.log.warn('OAuth polling timed out after max attempts')
+  const code = search.get('code')?.trim()
+  if (!code) return null
+  return { code, state: search.get('state')?.trim() ?? null }
+}
 
+/** Exchanges an authorization code for tokens and updates state on success. */
+async function completeOAuthFlow(
+  context: ExtensionContext,
+  tokenManager: TokenManager,
+  code: string,
+  codeVerifier: string,
+): Promise<void> {
+  const tokens = await exchangeCodeForTokens(code, codeVerifier)
+  await tokenManager.storeTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn)
+
+  const identity = await tokenManager.getIdentity()
   setState({
-    status: 'error',
-    errorMessage: 'Authorization timed out. Please try again.',
-    verificationUrl: '',
-    userCode: '',
+    status: 'connected',
+    authorizeUrl: '',
+    errorMessage: '',
+    email: identity?.email ?? '',
+    planType: identity?.planType ?? '',
   })
 
+  context.log.info('ChatGPT OAuth connected successfully')
   await context.events?.emit('openai.oauth.changed')
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Best-effort callback handler. Runs alongside manual paste — whichever path
+ * completes first wins. The other path becomes a no-op once pendingFlow is
+ * cleared.
+ */
+async function waitForOAuthCallback(
+  context: ExtensionContext,
+  tokenManager: TokenManager,
+  callbackServer: CallbackServer,
+): Promise<void> {
+  try {
+    const result = await callbackServer.waitForCallback()
+
+    if (!pendingFlow) {
+      // Manual paste already completed — discard this callback.
+      return
+    }
+
+    if (result.state !== pendingFlow.expectedState) {
+      throw new Error('OAuth state mismatch — possible CSRF attack. Please try again.')
+    }
+
+    await completeOAuthFlow(context, tokenManager, result.code, pendingFlow.codeVerifier)
+    pendingFlow = null
+  } catch (error) {
+    if (!pendingFlow) {
+      // Manual paste handled it; don't surface this error.
+      return
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    context.log.error('OAuth callback error', { error: message })
+    setState({ status: 'error', errorMessage: message, authorizeUrl: '' })
+    await context.events?.emit('openai.oauth.changed')
+  } finally {
+    callbackServer.close()
+    if (activeCallbackServer === callbackServer) {
+      activeCallbackServer = null
+    }
+  }
 }

@@ -37,53 +37,111 @@
           "apiKey": "",
           "baseUrl": "https://api.openai.com/v1",
           "organizationId": "",
-          "reasoningEffort": "medium"
+          "reasoningEffort": "medium",
+          "oauthCallbackUrl": ""
         },
-        "configSchema": {
-          "order": ["authMethod", "apiKey", "baseUrl", "organizationId", "reasoningEffort"],
-          "properties": {
-            "authMethod": {
-              "type": "select",
-              "title": "Authentication Method",
-              "description": "Choose how to authenticate with OpenAI.",
-              "default": "api_key",
-              "options": [
-                { "value": "api_key", "label": "API Key" },
-                { "value": "chatgpt_oauth", "label": "ChatGPT Login (Experimental)" }
-              ]
-            },
-            "apiKey": {
-              "type": "password",
-              "title": "API Key",
-              "description": "Your OpenAI API key",
-              "placeholder": "sk-...",
-              "visibleWhen": { "authMethod": "api_key" }
-            },
-            "baseUrl": {
-              "type": "url",
-              "title": "Base URL",
-              "description": "API base URL (for proxies/custom endpoints)",
-              "placeholder": "https://api.openai.com/v1",
-              "default": "https://api.openai.com/v1"
-            },
-            "organizationId": {
-              "type": "string",
-              "title": "Organization ID",
-              "description": "Optional OpenAI Organization ID",
-              "placeholder": "org-..."
-            },
-            "reasoningEffort": {
-              "type": "select",
-              "title": "Reasoning Effort",
-              "description": "Controls reasoning depth for models that support it. Set to None to disable.",
-              "default": "none",
-              "options": [
-                { "value": "none", "label": "None" },
-                { "value": "low", "label": "Low" },
-                { "value": "medium", "label": "Medium" },
-                { "value": "high", "label": "High" }
-              ]
-            }
+        "configView": {
+          "content": {
+            "component": "VerticalStack",
+            "gap": 1,
+            "children": [
+              {
+                "component": "Select",
+                "label": "Authentication Method",
+                "selectedValue": "$settings.authMethod",
+                "options": [
+                  { "value": "api_key", "label": "API Key" },
+                  { "value": "chatgpt_oauth", "label": "ChatGPT Login (Experimental)" }
+                ]
+              },
+              {
+                "component": "ConditionalGroup",
+                "condition": "$settings.authMethod == 'api_key'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 1,
+                    "children": [
+                      {
+                        "component": "PasswordInput",
+                        "label": "API Key",
+                        "placeholder": "sk-...",
+                        "value": "$settings.apiKey"
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Base URL",
+                        "placeholder": "https://api.openai.com/v1",
+                        "value": "$settings.baseUrl"
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Organization ID",
+                        "placeholder": "org-...",
+                        "value": "$settings.organizationId"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "component": "ConditionalGroup",
+                "condition": "$settings.authMethod == 'chatgpt_oauth'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.75,
+                    "children": [
+                      {
+                        "component": "Label",
+                        "text": "Sign in with your ChatGPT Plus/Pro account to use your subscription instead of API billing.",
+                        "style": { "opacity": "0.7", "font-size": "0.9em" }
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Connect ChatGPT Account",
+                        "onClickAction": "startChatGPTOAuth"
+                      },
+                      {
+                        "component": "Label",
+                        "text": "After clicking Connect a browser window opens. Sign in there. If your browser is redirected to a page that says \"This site can't be reached\" (e.g. when the API runs in Docker or on a remote host), copy that URL from the address bar and paste it below:",
+                        "style": { "opacity": "0.7", "font-size": "0.85em" }
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Redirect URL",
+                        "placeholder": "http://localhost:1455/auth/callback?code=...&state=...",
+                        "value": "$settings.oauthCallbackUrl"
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Submit Login",
+                        "onClickAction": {
+                          "action": "submitOAuthCallback",
+                          "params": { "url": "$settings.oauthCallbackUrl" }
+                        }
+                      },
+                      {
+                        "component": "Label",
+                        "text": "Connection status (Connected / email / plan) is shown in Settings → ChatGPT Account.",
+                        "style": { "opacity": "0.6", "font-size": "0.85em", "font-style": "italic" }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "component": "Select",
+                "label": "Reasoning Effort",
+                "selectedValue": "$settings.reasoningEffort",
+                "options": [
+                  { "value": "none", "label": "None" },
+                  { "value": "low", "label": "Low" },
+                  { "value": "medium", "label": "Medium" },
+                  { "value": "high", "label": "High" }
+                ]
+              }
+            ]
           }
         }
       }
@@ -136,18 +194,13 @@
                     "gap": 0.5,
                     "children": [
                       {
-                        "component": "Label",
-                        "text": "Go to the URL below and enter the code:"
+                        "component": "Markdown",
+                        "content": "$oauthState.authorizeUrl"
                       },
                       {
                         "component": "Label",
-                        "text": "$oauthState.verificationUrl",
-                        "style": { "font-family": "monospace", "word-break": "break-all" }
-                      },
-                      {
-                        "component": "Label",
-                        "text": "$oauthState.userCode",
-                        "style": { "font-size": "1.5em", "font-weight": "bold", "text-align": "center" }
+                        "text": "Waiting for login to complete...",
+                        "style": { "opacity": "0.6", "font-style": "italic", "font-size": "0.9em" }
                       }
                     ]
                   }
@@ -158,14 +211,30 @@
                 "condition": "$oauthState.status == 'connected'",
                 "children": [
                   {
-                    "component": "HorizontalStack",
+                    "component": "VerticalStack",
                     "gap": 0.5,
-                    "style": { "align-items": "center" },
                     "children": [
                       {
-                        "component": "Pill",
-                        "text": "Connected",
-                        "variant": "success"
+                        "component": "HorizontalStack",
+                        "gap": 0.5,
+                        "style": { "align-items": "center" },
+                        "children": [
+                          {
+                            "component": "Pill",
+                            "text": "Connected",
+                            "variant": "success"
+                          },
+                          {
+                            "component": "Label",
+                            "text": "$oauthState.email",
+                            "style": { "opacity": "0.85", "font-size": "0.9em" }
+                          },
+                          {
+                            "component": "Pill",
+                            "text": "$oauthState.planType",
+                            "variant": "info"
+                          }
+                        ]
                       },
                       {
                         "component": "Button",
