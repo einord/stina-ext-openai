@@ -98,14 +98,19 @@
                         "style": { "opacity": "0.7", "font-size": "0.9em" }
                       },
                       {
+                        "component": "Label",
+                        "text": "Step 1: click Connect to open the OpenAI sign-in page.",
+                        "style": { "opacity": "0.85", "font-size": "0.9em", "font-weight": "600" }
+                      },
+                      {
                         "component": "Button",
                         "text": "Connect ChatGPT Account",
                         "onClickAction": "startChatGPTOAuth"
                       },
                       {
                         "component": "Label",
-                        "text": "After clicking Connect a browser window opens. Sign in there. If your browser is redirected to a page that says \"This site can't be reached\" (e.g. when the API runs in Docker or on a remote host), copy that URL from the address bar and paste it below:",
-                        "style": { "opacity": "0.7", "font-size": "0.85em" }
+                        "text": "Step 2: after signing in your browser will be redirected to a localhost URL that probably can't be reached (e.g. when the API runs in Docker). Copy that URL from the address bar and paste it below, then click Submit Login.",
+                        "style": { "opacity": "0.85", "font-size": "0.9em", "font-weight": "600" }
                       },
                       {
                         "component": "TextInput",
@@ -119,12 +124,13 @@
                         "onClickAction": {
                           "action": "submitOAuthCallback",
                           "params": { "url": "$settings.oauthCallbackUrl" }
-                        }
+                        },
+                        "onSuccessClearFields": ["settings.oauthCallbackUrl"]
                       },
                       {
                         "component": "Label",
-                        "text": "Connection status (Connected / email / plan) is shown in Settings → ChatGPT Account.",
-                        "style": { "opacity": "0.6", "font-size": "0.85em", "font-style": "italic" }
+                        "text": "Step 3: click Save Model below to activate ChatGPT Login for this model. The connection status (email / plan) is also visible in Settings → ChatGPT Account.",
+                        "style": { "opacity": "0.85", "font-size": "0.9em", "font-weight": "600" }
                       }
                     ]
                   }
