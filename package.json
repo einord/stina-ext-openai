@@ -29,6 +29,9 @@
   },
   "devDependencies": {
     "@stina/extension-api": "^0.24.0",
+    "@types/archiver": "^7.0.0",
+    "@types/node": "^20.0.0",
+    "archiver": "^7.0.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   },
