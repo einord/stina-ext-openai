@@ -76,4 +76,3 @@ This extension uses the OpenAI [Responses API](https://platform.openai.com/docs/
 ## License
 
 MIT
-
