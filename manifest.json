@@ -19,7 +19,10 @@
 
   "permissions": [
     "network:*",
-    "provider.register"
+    "provider.register",
+    "actions.register",
+    "events.emit",
+    "secrets.manage"
   ],
 
   "contributes": {
@@ -30,10 +33,12 @@
         "description": "GPT-4o, o1, o3, o4-mini, 5.2 and other OpenAI models",
         "suggestedDefaultModel": "gpt-5.2",
         "defaultSettings": {
+          "authMethod": "api_key",
           "apiKey": "",
           "baseUrl": "https://api.openai.com/v1",
           "organizationId": "",
-          "reasoningEffort": "medium"
+          "reasoningEffort": "medium",
+          "oauthCallbackUrl": ""
         },
         "configView": {
           "content": {
@@ -41,33 +46,239 @@
             "gap": 1,
             "children": [
               {
-                "component": "PasswordInput",
-                "label": "API Key",
-                "placeholder": "sk-...",
-                "value": "$settings.apiKey"
+                "component": "Select",
+                "label": "Authentication Method",
+                "selectedValue": "$settings.authMethod",
+                "options": [
+                  { "value": "api_key", "label": "API Key" },
+                  { "value": "chatgpt_oauth", "label": "ChatGPT Login (Experimental)" }
+                ]
               },
               {
-                "component": "TextInput",
-                "label": "Base URL",
-                "placeholder": "https://api.openai.com/v1",
-                "value": "$settings.baseUrl"
+                "component": "ConditionalGroup",
+                "condition": "$settings.authMethod == 'api_key'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 1,
+                    "children": [
+                      {
+                        "component": "PasswordInput",
+                        "label": "API Key",
+                        "placeholder": "sk-...",
+                        "value": "$settings.apiKey"
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Base URL",
+                        "placeholder": "https://api.openai.com/v1",
+                        "value": "$settings.baseUrl"
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Organization ID",
+                        "placeholder": "org-...",
+                        "value": "$settings.organizationId"
+                      }
+                    ]
+                  }
+                ]
               },
               {
-                "component": "TextInput",
-                "label": "Organization ID",
-                "placeholder": "org-...",
-                "value": "$settings.organizationId"
+                "component": "ConditionalGroup",
+                "condition": "$settings.authMethod == 'chatgpt_oauth'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.75,
+                    "children": [
+                      {
+                        "component": "Label",
+                        "text": "Sign in with your ChatGPT Plus/Pro account to use your subscription instead of API billing.",
+                        "style": { "opacity": "0.7", "font-size": "0.9em" }
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Connect ChatGPT Account",
+                        "onClickAction": "startChatGPTOAuth"
+                      },
+                      {
+                        "component": "Label",
+                        "text": "After clicking Connect a browser window opens. Sign in there. If your browser is redirected to a page that says \"This site can't be reached\" (e.g. when the API runs in Docker or on a remote host), copy that URL from the address bar and paste it below:",
+                        "style": { "opacity": "0.7", "font-size": "0.85em" }
+                      },
+                      {
+                        "component": "TextInput",
+                        "label": "Redirect URL",
+                        "placeholder": "http://localhost:1455/auth/callback?code=...&state=...",
+                        "value": "$settings.oauthCallbackUrl"
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Submit Login",
+                        "onClickAction": {
+                          "action": "submitOAuthCallback",
+                          "params": { "url": "$settings.oauthCallbackUrl" }
+                        }
+                      },
+                      {
+                        "component": "Label",
+                        "text": "Connection status (Connected / email / plan) is shown in Settings → ChatGPT Account.",
+                        "style": { "opacity": "0.6", "font-size": "0.85em", "font-style": "italic" }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "component": "Select",
                 "label": "Reasoning Effort",
+                "selectedValue": "$settings.reasoningEffort",
                 "options": [
                   { "value": "none", "label": "None" },
                   { "value": "low", "label": "Low" },
                   { "value": "medium", "label": "Medium" },
                   { "value": "high", "label": "High" }
-                ],
-                "selectedValue": "$settings.reasoningEffort"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "toolSettings": [
+      {
+        "id": "chatgpt-oauth",
+        "title": "ChatGPT Account",
+        "description": "Connect your ChatGPT account to use your subscription instead of API billing.",
+        "view": {
+          "kind": "component",
+          "data": {
+            "oauthState": {
+              "action": "getOAuthState",
+              "refreshOn": ["openai.oauth.changed"]
+            }
+          },
+          "content": {
+            "component": "VerticalStack",
+            "gap": 1,
+            "children": [
+              {
+                "component": "ConditionalGroup",
+                "condition": "$oauthState.status == 'disconnected'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.5,
+                    "children": [
+                      {
+                        "component": "Label",
+                        "text": "Experimental: Sign in with your ChatGPT account to use your Plus/Pro subscription.",
+                        "style": { "opacity": "0.7", "font-size": "0.9em" }
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Connect ChatGPT Account",
+                        "onClickAction": "startChatGPTOAuth"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "component": "ConditionalGroup",
+                "condition": "$oauthState.status == 'awaiting'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.5,
+                    "children": [
+                      {
+                        "component": "Markdown",
+                        "content": "$oauthState.authorizeUrl"
+                      },
+                      {
+                        "component": "Label",
+                        "text": "Waiting for login to complete...",
+                        "style": { "opacity": "0.6", "font-style": "italic", "font-size": "0.9em" }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "component": "ConditionalGroup",
+                "condition": "$oauthState.status == 'connected'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.5,
+                    "children": [
+                      {
+                        "component": "HorizontalStack",
+                        "gap": 0.5,
+                        "style": { "align-items": "center" },
+                        "children": [
+                          {
+                            "component": "Pill",
+                            "text": "Connected",
+                            "variant": "success"
+                          },
+                          {
+                            "component": "Label",
+                            "text": "$oauthState.email",
+                            "style": { "opacity": "0.85", "font-size": "0.9em" }
+                          },
+                          {
+                            "component": "Pill",
+                            "text": "$oauthState.planType",
+                            "variant": "info"
+                          }
+                        ]
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Disconnect",
+                        "type": "danger",
+                        "onClickAction": "disconnectChatGPTOAuth"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "component": "ConditionalGroup",
+                "condition": "$oauthState.status == 'error'",
+                "children": [
+                  {
+                    "component": "VerticalStack",
+                    "gap": 0.5,
+                    "children": [
+                      {
+                        "component": "HorizontalStack",
+                        "gap": 0.5,
+                        "style": { "align-items": "center" },
+                        "children": [
+                          {
+                            "component": "Pill",
+                            "text": "Error",
+                            "variant": "danger"
+                          },
+                          {
+                            "component": "Label",
+                            "text": "$oauthState.errorMessage",
+                            "style": { "opacity": "0.8", "font-size": "0.9em" }
+                          }
+                        ]
+                      },
+                      {
+                        "component": "Button",
+                        "text": "Retry",
+                        "onClickAction": "startChatGPTOAuth"
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           }
